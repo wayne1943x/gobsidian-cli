@@ -501,14 +501,13 @@ func buildLocalRecords(files map[string]vault.File, state State, opts BridgeOpti
 		}
 		remotePath := toRemotePath(localPath, opts.BaseDir)
 		doc := protocol.Document{
-			ID:       previous.DocID,
-			Rev:      chooseDocumentRev(previous.RemoteRev, opts.ForceLocal),
-			Path:     remotePath,
-			Mtime:    opts.NowMillis,
-			Type:     "plain",
-			Deleted:  true,
-			DeletedP: true,
-			Eden:     map[string]protocol.EdenChunk{},
+			ID:      previous.DocID,
+			Rev:     chooseDocumentRev(previous.RemoteRev, opts.ForceLocal),
+			Path:    remotePath,
+			Mtime:   opts.NowMillis,
+			Type:    "plain",
+			Deleted: true,
+			Eden:    map[string]protocol.EdenChunk{},
 		}
 		encodedDoc, err := codec.EncodeDocument(doc)
 		if err != nil {

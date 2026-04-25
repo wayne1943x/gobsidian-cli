@@ -145,6 +145,9 @@ func TestRunBridgeOncePushesLocalChangesAndDeletes(t *testing.T) {
 	if len(store.written) != 1 || store.written[0].Document == nil || !store.written[0].Document.IsDeleted() {
 		t.Fatalf("expected tombstone write, got %#v", store.written)
 	}
+	if store.written[0].Document.DeletedP {
+		t.Fatalf("LiveSync file deletes should keep metadata and use deleted=true, got %#v", store.written[0].Document)
+	}
 }
 
 func TestRunBridgeOnceForceLocalPushesUnchangedTrackedFiles(t *testing.T) {
@@ -204,7 +207,7 @@ func TestRunBridgeOnceForceLocalDeletesRemoteOnlyFiles(t *testing.T) {
 			tombstone = record.Document
 		}
 	}
-	if tombstone == nil || !tombstone.IsDeleted() || tombstone.Rev != "" {
+	if tombstone == nil || !tombstone.IsDeleted() || tombstone.DeletedP || tombstone.Rev != "" {
 		t.Fatalf("expected remote-only file tombstone with refreshed rev, got %#v", tombstone)
 	}
 	state, err := LoadState(statePath)
@@ -371,7 +374,7 @@ func TestRunBridgeOncePushesEncryptedObfuscatedLocalDelete(t *testing.T) {
 		t.Fatalf("expected tombstone write, got %#v", store.written)
 	}
 	doc := store.written[0].Document
-	if !doc.IsDeleted() || !strings.HasPrefix(doc.ID, "f:") || !strings.HasPrefix(doc.Path, `/\:%=`) {
+	if !doc.IsDeleted() || doc.DeletedP || !strings.HasPrefix(doc.ID, "f:") || !strings.HasPrefix(doc.Path, `/\:%=`) {
 		t.Fatalf("expected encrypted obfuscated tombstone, got %#v", doc)
 	}
 }
