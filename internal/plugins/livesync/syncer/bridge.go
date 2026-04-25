@@ -169,6 +169,9 @@ func runBridgeOnce(ctx context.Context, store CouchStore, opts BridgeOptions, st
 			if record.Document == nil || record.Document.Path == "" {
 				continue
 			}
+			if record.Document.IsDeleted() {
+				continue
+			}
 			localPath, ok := toLocalPath(record.Document.Path, opts.BaseDir)
 			if ok {
 				if _, tracked := next.Files[localPath]; !tracked {

@@ -245,6 +245,8 @@ func (c *Client) BulkWrite(ctx context.Context, records []protocol.Record) (map[
 					return nil, err
 				} else if ok {
 					doc["_rev"], _ = existing["_rev"].(string)
+				} else if record.Document.IsDeleted() {
+					continue
 				}
 			}
 			docTemplates[record.Document.ID] = copyDoc(doc)
@@ -303,11 +305,17 @@ func (c *Client) retryConflictedDocs(ctx context.Context, templates map[string]m
 			return nil, err
 		}
 		if !ok {
+			if docWantsDelete(doc) {
+				continue
+			}
 			delete(doc, "_rev")
 		} else {
 			doc["_rev"], _ = existing["_rev"].(string)
 		}
 		reqBody.Docs = append(reqBody.Docs, doc)
+	}
+	if len(reqBody.Docs) == 0 {
+		return map[string]string{}, nil
 	}
 	results, err := c.postBulkDocs(ctx, reqBody)
 	if err != nil {
@@ -348,6 +356,12 @@ func copyDoc(in map[string]any) map[string]any {
 		out[key] = value
 	}
 	return out
+}
+
+func docWantsDelete(doc map[string]any) bool {
+	deleted, _ := doc["_deleted"].(bool)
+	deletedCompat, _ := doc["deleted"].(bool)
+	return deleted || deletedCompat
 }
 
 func (c *Client) endpoint(path string) string {

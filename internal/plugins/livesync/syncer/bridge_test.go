@@ -207,6 +207,13 @@ func TestRunBridgeOnceForceLocalDeletesRemoteOnlyFiles(t *testing.T) {
 	if tombstone == nil || !tombstone.IsDeleted() || tombstone.Rev != "" {
 		t.Fatalf("expected remote-only file tombstone with refreshed rev, got %#v", tombstone)
 	}
+	state, err := LoadState(statePath)
+	if err != nil {
+		t.Fatalf("LoadState returned error: %v", err)
+	}
+	if _, ok := state.Files["remote.md"]; ok {
+		t.Fatalf("force-local tombstone should remove remote-only file from state: %#v", state.Files)
+	}
 }
 
 func TestRunBridgeOnceDoesNotResurrectFileDeletedAfterLocalUpload(t *testing.T) {

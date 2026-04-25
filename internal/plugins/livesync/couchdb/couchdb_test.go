@@ -279,6 +279,70 @@ func TestBulkWriteRetriesDocumentConflictWithLatestRevision(t *testing.T) {
 	}
 }
 
+func TestBulkWriteTreatsMissingDeletedDocumentAsAlreadyDeleted(t *testing.T) {
+	var bulkCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/vault/note.md":
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "not_found", "reason": "deleted"})
+		case "/vault/_bulk_docs":
+			bulkCalls++
+			t.Fatal("already deleted tombstone should not be written without a revision")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := New(Config{URL: server.URL, Database: "vault"})
+	if _, err := client.BulkWrite(t.Context(), []protocol.Record{
+		{Document: &protocol.Document{ID: "note.md", Path: "note.md", Deleted: true, DeletedP: true}},
+	}); err != nil {
+		t.Fatalf("BulkWrite returned error: %v", err)
+	}
+	if bulkCalls != 0 {
+		t.Fatalf("unexpected bulk calls: %d", bulkCalls)
+	}
+}
+
+func TestBulkWriteTreatsMissingDeletedDocumentAfterConflictAsAlreadyDeleted(t *testing.T) {
+	var bulkCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/vault/note.md":
+			if bulkCalls == 0 {
+				_ = json.NewEncoder(w).Encode(map[string]any{"_id": "note.md", "_rev": "1-current"})
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "not_found", "reason": "deleted"})
+		case "/vault/_bulk_docs":
+			bulkCalls++
+			if bulkCalls == 1 {
+				_ = json.NewEncoder(w).Encode([]bulkDocsResponse{
+					{ID: "note.md", Error: "conflict", Reason: "Document update conflict."},
+				})
+				return
+			}
+			t.Fatal("already deleted retry tombstone should not be written without a revision")
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := New(Config{URL: server.URL, Database: "vault"})
+	if _, err := client.BulkWrite(t.Context(), []protocol.Record{
+		{Document: &protocol.Document{ID: "note.md", Path: "note.md", Deleted: true, DeletedP: true}},
+	}); err != nil {
+		t.Fatalf("BulkWrite returned error: %v", err)
+	}
+	if bulkCalls != 1 {
+		t.Fatalf("expected only initial bulk call, got %d", bulkCalls)
+	}
+}
+
 func TestSyncParametersReadsPBKDF2SaltFromLocalDoc(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/vault/_local/obsidian_livesync_sync_parameters" {
