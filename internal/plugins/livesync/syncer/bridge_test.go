@@ -74,6 +74,9 @@ func TestRunBridgeOncePreservesUntrackedLocalFileOnInitialPull(t *testing.T) {
 	if err != nil || string(conflict) != "local draft" {
 		t.Fatalf("expected local draft in conflict file, got=%q err=%v", string(conflict), err)
 	}
+	if len(store.written) != 0 {
+		t.Fatalf("force remote should not upload preserved conflict files: %#v", store.written)
+	}
 }
 
 func TestRunBridgeOncePushesLocalChangesAndDeletes(t *testing.T) {
@@ -116,6 +119,68 @@ func TestRunBridgeOncePushesLocalChangesAndDeletes(t *testing.T) {
 	}
 	if len(store.written) != 1 || store.written[0].Document == nil || !store.written[0].Document.IsDeleted() {
 		t.Fatalf("expected tombstone write, got %#v", store.written)
+	}
+}
+
+func TestRunBridgeOnceForceLocalPushesUnchangedTrackedFiles(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, ".gobsidian", "state.json")
+	content := []byte("local wins")
+	if err := os.WriteFile(filepath.Join(root, "note.md"), content, 0o644); err != nil {
+		t.Fatalf("WriteFile note: %v", err)
+	}
+	if err := SaveState(statePath, State{
+		CouchSince: "4",
+		Files: map[string]FileState{
+			"note.md": {Hash: hashBytes(content), DocID: "note.md", RemoteRev: "1-old"},
+		},
+	}); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+	store := &memoryCouch{
+		changes: []couchdb.Change{
+			{ID: "note.md", Seq: "5", Record: protocol.Record{Document: &protocol.Document{ID: "note.md", Rev: "2-remote", Path: "note.md", Type: "plain", Children: []string{"h:remote"}, Eden: map[string]protocol.EdenChunk{}}}},
+		},
+		lastSeq: "5",
+	}
+
+	if err := RunBridgeOnce(context.Background(), store, BridgeOptions{Root: root, StatePath: statePath, NowMillis: 8000, ForceLocal: true}); err != nil {
+		t.Fatalf("RunBridgeOnce returned error: %v", err)
+	}
+	if len(store.written) != 2 {
+		t.Fatalf("expected force local to write chunk and document, got %#v", store.written)
+	}
+	doc := store.written[1].Document
+	if doc == nil || doc.ID != "note.md" || doc.Rev != "" {
+		t.Fatalf("force local should refresh remote rev in CouchDB layer, got %#v", store.written[1])
+	}
+}
+
+func TestRunBridgeOnceForceLocalDeletesRemoteOnlyFiles(t *testing.T) {
+	root := t.TempDir()
+	statePath := filepath.Join(root, ".gobsidian", "state.json")
+	if err := os.WriteFile(filepath.Join(root, "local.md"), []byte("local"), 0o644); err != nil {
+		t.Fatalf("WriteFile local: %v", err)
+	}
+	store := &memoryCouch{
+		records: []protocol.Record{
+			{Chunk: &protocol.Chunk{ID: "h:remote", Data: "remote"}},
+			{Document: &protocol.Document{ID: "remote.md", Rev: "3-remote", Path: "remote.md", Type: "plain", Children: []string{"h:remote"}, Eden: map[string]protocol.EdenChunk{}}},
+		},
+		lastSeq: "7",
+	}
+
+	if err := RunBridgeOnce(context.Background(), store, BridgeOptions{Root: root, StatePath: statePath, NowMillis: 9000, ForceLocal: true}); err != nil {
+		t.Fatalf("RunBridgeOnce returned error: %v", err)
+	}
+	var tombstone *protocol.Document
+	for _, record := range store.written {
+		if record.Document != nil && record.Document.ID == "remote.md" {
+			tombstone = record.Document
+		}
+	}
+	if tombstone == nil || !tombstone.IsDeleted() || tombstone.Rev != "" {
+		t.Fatalf("expected remote-only file tombstone with refreshed rev, got %#v", tombstone)
 	}
 }
 

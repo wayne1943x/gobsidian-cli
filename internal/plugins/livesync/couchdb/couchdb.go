@@ -206,9 +206,14 @@ func (c *Client) SyncParameters(ctx context.Context) ([]byte, error) {
 func (c *Client) BulkWrite(ctx context.Context, records []protocol.Record) (map[string]string, error) {
 	reqBody := bulkDocsRequest{Docs: make([]map[string]any, 0, len(records))}
 	revs := map[string]string{}
+	chunkIDs := map[string]bool{}
 	for _, record := range records {
 		switch {
 		case record.Chunk != nil:
+			if chunkIDs[record.Chunk.ID] {
+				continue
+			}
+			chunkIDs[record.Chunk.ID] = true
 			if existing, ok, err := c.GetDoc(ctx, record.Chunk.ID); err != nil {
 				return nil, err
 			} else if ok {
@@ -264,6 +269,17 @@ func (c *Client) BulkWrite(ctx context.Context, records []protocol.Record) (map[
 	}
 	for _, result := range results {
 		if !result.OK {
+			if result.Error == "conflict" && strings.HasPrefix(result.ID, "h:") {
+				existing, ok, err := c.GetDoc(ctx, result.ID)
+				if err != nil {
+					return nil, err
+				}
+				typ, _ := existing["type"].(string)
+				if ok && typ == "leaf" {
+					revs[result.ID], _ = existing["_rev"].(string)
+					continue
+				}
+			}
 			return nil, fmt.Errorf("bulk write failed for %s: %s %s", result.ID, result.Error, result.Reason)
 		}
 		revs[result.ID] = result.Rev

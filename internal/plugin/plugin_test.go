@@ -9,7 +9,7 @@ import (
 
 type fakeDriver struct{}
 
-func (fakeDriver) Sync(context.Context, config.Target) (SyncResult, error) {
+func (fakeDriver) Sync(context.Context, config.Target, SyncOptions) (SyncResult, error) {
 	return SyncResult{Vault: "personal", Plugin: "fake", FilesWritten: 1}, nil
 }
 
@@ -26,7 +26,7 @@ func TestRegistryRegistersAndFindsDrivers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get returned error: %v", err)
 	}
-	res, err := driver.Sync(context.Background(), config.Target{Name: "personal"})
+	res, err := driver.Sync(context.Background(), config.Target{Name: "personal"}, SyncOptions{})
 	if err != nil || res.FilesWritten != 1 {
 		t.Fatalf("unexpected sync result %#v err=%v", res, err)
 	}

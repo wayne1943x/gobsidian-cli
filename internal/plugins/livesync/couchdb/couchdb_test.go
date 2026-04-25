@@ -157,6 +157,48 @@ func TestBulkWriteSkipsExistingChunksAndUsesExistingDocumentRevisions(t *testing
 	}
 }
 
+func TestBulkWriteTreatsChunkConflictAsExistingLeaf(t *testing.T) {
+	var chunkGets int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/vault/h:+chunk":
+			chunkGets++
+			if chunkGets == 1 {
+				w.WriteHeader(http.StatusNotFound)
+				_ = json.NewEncoder(w).Encode(map[string]any{"error": "not_found", "reason": "missing"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"_id": "h:+chunk", "_rev": "1-existing", "type": "leaf"})
+		case "/vault/note.md":
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": "not_found", "reason": "missing"})
+		case "/vault/_bulk_docs":
+			_ = json.NewEncoder(w).Encode([]bulkDocsResponse{
+				{ID: "h:+chunk", Error: "conflict", Reason: "Document update conflict."},
+				{ID: "note.md", Rev: "2-note", OK: true},
+			})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := New(Config{URL: server.URL, Database: "vault"})
+	responses, err := client.BulkWrite(t.Context(), []protocol.Record{
+		{Chunk: &protocol.Chunk{ID: "h:+chunk", Data: "hello"}},
+		{Document: &protocol.Document{ID: "note.md", Path: "note.md", Type: "plain", Children: []string{"h:+chunk"}, Eden: map[string]protocol.EdenChunk{}}},
+	})
+	if err != nil {
+		t.Fatalf("BulkWrite returned error: %v", err)
+	}
+	if responses["h:+chunk"] != "1-existing" || responses["note.md"] != "2-note" {
+		t.Fatalf("unexpected responses: %#v", responses)
+	}
+	if chunkGets != 2 {
+		t.Fatalf("expected conflict path to re-read chunk, got %d GETs", chunkGets)
+	}
+}
+
 func TestSyncParametersReadsPBKDF2SaltFromLocalDoc(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/vault/_local/obsidian_livesync_sync_parameters" {

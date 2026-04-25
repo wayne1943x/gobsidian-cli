@@ -68,11 +68,16 @@ gobsidian sync --vault personal --config config.yaml
 ```bash
 gobsidian sync --config config.yaml
 gobsidian sync --vault personal --config config.yaml
+gobsidian sync --vault personal --force-remote --config config.yaml
+gobsidian sync --vault personal --force-local --config config.yaml
 gobsidian status --config config.yaml
 gobsidian status --vault personal --config config.yaml
 ```
 
 `sync` and `status` target all configured vaults unless `--vault` is passed.
+Use `--force-remote` when LiveSync should overwrite local files for that run.
+Use `--force-local` when the local vault should overwrite CouchDB, including
+tombstoning remote notes that are absent locally. Do not combine them.
 
 ### Search
 

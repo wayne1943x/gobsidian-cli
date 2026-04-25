@@ -30,6 +30,7 @@ type BridgeOptions struct {
 	DryRun              bool
 	NowMillis           int64
 	ForceRemote         bool
+	ForceLocal          bool
 	Passphrase          string
 	PBKDF2Salt          []byte
 	PropertyObfuscation bool
@@ -120,6 +121,12 @@ func runBridgeOnce(ctx context.Context, store CouchStore, opts BridgeOptions, st
 	if len(changes) > 0 {
 		remoteChanged = true
 	}
+	if opts.ForceLocal {
+		remoteChanged = false
+		if err := seedStateFromRemote(ctx, store, opts, &state); err != nil {
+			return state, err
+		}
+	}
 	if remoteChanged {
 		localBefore, err := vault.Scan(opts.Root)
 		if err != nil {
@@ -140,6 +147,9 @@ func runBridgeOnce(ctx context.Context, store CouchStore, opts BridgeOptions, st
 	}
 	if lastSeq != "" {
 		state.CouchSince = lastSeq
+	}
+	if opts.ForceRemote {
+		return state, nil
 	}
 	files, err := vault.Scan(opts.Root)
 	if err != nil {
@@ -199,6 +209,55 @@ func pullRemote(ctx context.Context, store CouchStore, opts BridgeOptions, local
 		return err
 	}
 	return applyRemoteRecords(records, opts, localBefore, state)
+}
+
+func seedStateFromRemote(ctx context.Context, store CouchStore, opts BridgeOptions, state *State) error {
+	records, err := store.FetchRecords(ctx)
+	if err != nil {
+		return err
+	}
+	codec := protocol.NewCodec(protocol.CodecOptions{
+		Passphrase:          opts.Passphrase,
+		PBKDF2Salt:          opts.PBKDF2Salt,
+		PropertyObfuscation: opts.PropertyObfuscation,
+	})
+	records, err = codec.DecodeRecords(records)
+	if err != nil {
+		return err
+	}
+	projector := protocol.NewProjector()
+	if err := projector.Apply(records); err != nil {
+		return err
+	}
+	remoteDocs := map[string]protocol.Document{}
+	for _, record := range records {
+		if record.Document == nil || record.Document.Path == "" || record.Document.IsDeleted() {
+			continue
+		}
+		if _, ok := toLocalPath(record.Document.Path, opts.BaseDir); !ok {
+			continue
+		}
+		remoteDocs[record.Document.Path] = *record.Document
+	}
+	remoteFiles, err := projector.Files()
+	if err != nil {
+		return err
+	}
+	for remotePath, file := range remoteFiles {
+		localPath, ok := toLocalPath(remotePath, opts.BaseDir)
+		if !ok {
+			continue
+		}
+		doc := remoteDocs[remotePath]
+		state.Files[localPath] = FileState{
+			Hash:      hashBytes(file.Content),
+			DocID:     doc.ID,
+			RemoteRev: doc.Rev,
+			Mtime:     file.Mtime,
+			Size:      int64(len(file.Content)),
+		}
+	}
+	return nil
 }
 
 func pullRemoteChanges(ctx context.Context, store CouchStore, opts BridgeOptions, changes []couchdb.Change, localBefore map[string]vault.File, state *State) error {
@@ -372,7 +431,7 @@ func buildLocalRecords(files map[string]vault.File, state State, opts BridgeOpti
 		if hash == "" {
 			hash = hashBytes(file.Content)
 		}
-		if previous, ok := state.Files[localPath]; ok && previous.Hash == hash {
+		if previous, ok := state.Files[localPath]; ok && previous.Hash == hash && !opts.ForceLocal {
 			continue
 		}
 		remotePath := toRemotePath(localPath, opts.BaseDir)
@@ -389,7 +448,7 @@ func buildLocalRecords(files map[string]vault.File, state State, opts BridgeOpti
 		}
 		doc := &protocol.Document{
 			ID:       docID,
-			Rev:      previous.RemoteRev,
+			Rev:      chooseDocumentRev(previous.RemoteRev, opts.ForceLocal),
 			Path:     remotePath,
 			Ctime:    chooseMtime(file.Mtime, opts.NowMillis),
 			Mtime:    chooseMtime(file.Mtime, opts.NowMillis),
@@ -408,7 +467,7 @@ func buildLocalRecords(files map[string]vault.File, state State, opts BridgeOpti
 		next.Files[localPath] = FileState{
 			Hash:      hash,
 			DocID:     docID,
-			RemoteRev: previous.RemoteRev,
+			RemoteRev: chooseDocumentRev(previous.RemoteRev, opts.ForceLocal),
 			Mtime:     file.Mtime,
 			Size:      int64(len(file.Content)),
 		}
@@ -430,7 +489,7 @@ func buildLocalRecords(files map[string]vault.File, state State, opts BridgeOpti
 		remotePath := toRemotePath(localPath, opts.BaseDir)
 		doc := protocol.Document{
 			ID:       previous.DocID,
-			Rev:      previous.RemoteRev,
+			Rev:      chooseDocumentRev(previous.RemoteRev, opts.ForceLocal),
 			Path:     remotePath,
 			Mtime:    opts.NowMillis,
 			Type:     "plain",
@@ -453,6 +512,13 @@ func chooseMtime(fileMtime, fallback int64) int64 {
 		return fileMtime
 	}
 	return fallback
+}
+
+func chooseDocumentRev(remoteRev string, forceLocal bool) string {
+	if forceLocal {
+		return ""
+	}
+	return remoteRev
 }
 
 func toLocalPath(remotePath, baseDir string) (string, bool) {

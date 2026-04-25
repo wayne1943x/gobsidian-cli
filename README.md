@@ -56,33 +56,33 @@ When `--config` is omitted, `gobsidian` searches:
 2. `/etc/gobsidian/config.yaml`
 3. `./config.yaml`
 
-The top-level `plugin` selects how `plugin_settings` is parsed. For `livesync`,
-`plugin_settings.targets` is the list of LiveSync-backed vault mappings. v1
-supports the `couchdb` backend under each target's `livesync` settings.
+Top-level `targets` is the list of vault mappings. Each target selects its own
+`plugin`, so different vaults can use different sync drivers in the same config.
+v1 supports the `livesync` plugin with the `couchdb` backend under each target's
+`livesync` settings.
 
 Minimal example:
 
 ```yaml
 version: 1
 
-plugin: livesync
-plugin_settings:
-  targets:
-    - name: personal
-      vault:
-        path: /vault/obsidian-personal
-      state:
-        path: /var/lib/gobsidian/state/personal.json
-      livesync:
-        couchdb:
-          url: http://couchdb:5984
-          db: obsidian_personal
-          username: root
-          password: ${COUCHDB_PASSWORD}
-          passphrase: ${LIVESYNC_PASSPHRASE}
-          property_obfuscation: true
-          base_dir: ""
-          dry_run: false
+targets:
+  - name: personal
+    plugin: livesync
+    vault:
+      path: /vault/obsidian-personal
+    state:
+      path: /var/lib/gobsidian/state/personal.json
+    livesync:
+      couchdb:
+        url: http://couchdb:5984
+        db: obsidian_personal
+        username: root
+        password: ${COUCHDB_PASSWORD}
+        passphrase: ${LIVESYNC_PASSPHRASE}
+        property_obfuscation: true
+        base_dir: ""
+        dry_run: false
 ```
 
 See [config.example.yaml](config.example.yaml) for required fields, optional
@@ -95,12 +95,19 @@ fields, defaults, and a multi-vault example.
 ```bash
 gobsidian sync --config config.yaml
 gobsidian sync --vault personal --config config.yaml
+gobsidian sync --vault personal --force-remote --config config.yaml
+gobsidian sync --vault personal --force-local --config config.yaml
 
 gobsidian status --config config.yaml
 gobsidian status --vault personal --config config.yaml
 ```
 
 `sync` and `status` run against all configured vaults unless `--vault` is passed.
+Use `--force-remote` to rebuild the local vault from LiveSync data without
+uploading local changes during that run. Use `--force-local` to make the local
+vault authoritative: gobsidian fetches current remote revisions, rewrites local
+files to CouchDB, and tombstones remote notes that are absent locally.
+The force flags are mutually exclusive.
 
 ### Search
 
@@ -178,6 +185,8 @@ Sync and status commands run against all configured vaults by default:
 ```bash
 gobsidian sync
 gobsidian sync --vault personal
+gobsidian sync --vault personal --force-remote
+gobsidian sync --vault personal --force-local
 ```
 
 ## Output

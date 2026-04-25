@@ -9,8 +9,13 @@ import (
 )
 
 type Driver interface {
-	Sync(context.Context, config.Target) (SyncResult, error)
+	Sync(context.Context, config.Target, SyncOptions) (SyncResult, error)
 	Status(context.Context, config.Target) (StatusResult, error)
+}
+
+type SyncOptions struct {
+	ForceRemote bool
+	ForceLocal  bool
 }
 
 type Registry struct {

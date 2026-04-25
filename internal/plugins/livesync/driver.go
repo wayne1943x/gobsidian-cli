@@ -34,7 +34,7 @@ func Register(registry interface {
 	return registry.Register(PluginName, New(logger))
 }
 
-func (d *Driver) Sync(ctx context.Context, target config.Target) (plugin.SyncResult, error) {
+func (d *Driver) Sync(ctx context.Context, target config.Target, syncOpts plugin.SyncOptions) (plugin.SyncResult, error) {
 	start := time.Now()
 	couch := target.LiveSync.CouchDB
 	store := couchdb.New(couchdb.Config{
@@ -48,6 +48,8 @@ func (d *Driver) Sync(ctx context.Context, target config.Target) (plugin.SyncRes
 		StatePath:           statePath(target),
 		BaseDir:             couch.BaseDir,
 		DryRun:              couch.DryRun,
+		ForceRemote:         syncOpts.ForceRemote,
+		ForceLocal:          syncOpts.ForceLocal,
 		Passphrase:          couch.Passphrase,
 		PropertyObfuscation: couch.PropertyObfuscation,
 	}

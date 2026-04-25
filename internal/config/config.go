@@ -13,18 +13,13 @@ import (
 const CurrentVersion = 1
 
 type Config struct {
-	Version        int            `json:"version" mapstructure:"version"`
-	Plugin         string         `json:"plugin" mapstructure:"plugin"`
-	PluginSettings PluginSettings `json:"plugin_settings" mapstructure:"plugin_settings"`
-	Targets        []Target       `json:"-" mapstructure:"-"`
-}
-
-type PluginSettings struct {
+	Version int      `json:"version" mapstructure:"version"`
 	Targets []Target `json:"targets" mapstructure:"targets"`
 }
 
 type Target struct {
 	Name     string         `json:"name" mapstructure:"name"`
+	Plugin   string         `json:"plugin" mapstructure:"plugin"`
 	Vault    VaultConfig    `json:"vault" mapstructure:"vault"`
 	State    StateConfig    `json:"state" mapstructure:"state"`
 	LiveSync LiveSyncConfig `json:"livesync" mapstructure:"livesync"`
@@ -106,7 +101,7 @@ func (c Config) FilterTargets(name string) (Config, error) {
 	}
 	for _, target := range c.Targets {
 		if target.Name == name {
-			return Config{Version: c.Version, Plugin: c.Plugin, PluginSettings: c.PluginSettings, Targets: []Target{target}}, nil
+			return Config{Version: c.Version, Targets: []Target{target}}, nil
 		}
 	}
 	return Config{}, fmt.Errorf("vault %q not found", name)
@@ -130,47 +125,45 @@ func validate(cfg *Config) error {
 	if cfg.Version != CurrentVersion {
 		return fmt.Errorf("unsupported config version %d", cfg.Version)
 	}
-	if cfg.Plugin == "" {
-		return fmt.Errorf("plugin is required")
-	}
-	if cfg.Plugin == "livesync-couchdb" {
-		return fmt.Errorf(`plugin "livesync-couchdb" is no longer supported; use plugin "livesync"`)
-	}
-	cfg.Targets = cfg.PluginSettings.Targets
 	if len(cfg.Targets) == 0 {
-		return fmt.Errorf("plugin_settings.targets is required")
+		return fmt.Errorf("targets is required")
 	}
 	seen := map[string]bool{}
 	for i := range cfg.Targets {
 		target := &cfg.Targets[i]
 		if target.Name == "" {
-			return fmt.Errorf("plugin_settings.targets[%d].name is required", i)
+			return fmt.Errorf("targets[%d].name is required", i)
 		}
 		if seen[target.Name] {
 			return fmt.Errorf("duplicate target %q", target.Name)
 		}
 		seen[target.Name] = true
-		if target.Vault.Path == "" {
-			return fmt.Errorf("plugin_settings.targets[%d].vault.path is required", i)
+		if target.Plugin == "" {
+			return fmt.Errorf("targets[%d].plugin is required", i)
 		}
-		if cfg.Plugin == "livesync" {
+		if target.Plugin == "livesync-couchdb" {
+			return fmt.Errorf(`targets[%d].plugin "livesync-couchdb" is no longer supported; use plugin "livesync"`, i)
+		}
+		if target.Vault.Path == "" {
+			return fmt.Errorf("targets[%d].vault.path is required", i)
+		}
+		if target.Plugin == "livesync" {
 			if target.LiveSync.CouchDB.URL == "" {
-				return fmt.Errorf("plugin_settings.targets[%d].livesync.couchdb.url is required", i)
+				return fmt.Errorf("targets[%d].livesync.couchdb.url is required", i)
 			}
 			if target.LiveSync.CouchDB.DB == "" {
-				return fmt.Errorf("plugin_settings.targets[%d].livesync.couchdb.db is required", i)
+				return fmt.Errorf("targets[%d].livesync.couchdb.db is required", i)
 			}
 		}
-		cfg.PluginSettings.Targets[i] = *target
 	}
 	return nil
 }
 
 func expandEnv(cfg *Config) {
-	cfg.Plugin = os.ExpandEnv(cfg.Plugin)
-	for i := range cfg.PluginSettings.Targets {
-		target := &cfg.PluginSettings.Targets[i]
+	for i := range cfg.Targets {
+		target := &cfg.Targets[i]
 		target.Name = os.ExpandEnv(target.Name)
+		target.Plugin = os.ExpandEnv(target.Plugin)
 		target.Vault.Path = os.ExpandEnv(target.Vault.Path)
 		target.State.Path = os.ExpandEnv(target.State.Path)
 		target.LiveSync.CouchDB.URL = os.ExpandEnv(target.LiveSync.CouchDB.URL)

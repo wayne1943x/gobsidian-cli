@@ -6,28 +6,27 @@ import (
 	"testing"
 )
 
-func TestLoadParsesPluginTargetsAndExpandsEnv(t *testing.T) {
+func TestLoadParsesTargetsWithPerTargetPluginAndExpandsEnv(t *testing.T) {
 	t.Setenv("COUCHDB_PASSWORD", "secret")
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := []byte(`version: 1
-plugin: livesync
-plugin_settings:
-  targets:
-    - name: personal
-      vault:
-        path: /vault/personal
-      state:
-        path: /state/personal.json
-      livesync:
-        couchdb:
-          url: http://couchdb:5984
-          db: obsidian_personal
-          username: root
-          password: ${COUCHDB_PASSWORD}
-          passphrase: ""
-          property_obfuscation: true
-          base_dir: notes
-          dry_run: false
+targets:
+  - name: personal
+    plugin: livesync
+    vault:
+      path: /vault/personal
+    state:
+      path: /state/personal.json
+    livesync:
+      couchdb:
+        url: http://couchdb:5984
+        db: obsidian_personal
+        username: root
+        password: ${COUCHDB_PASSWORD}
+        passphrase: ""
+        property_obfuscation: true
+        base_dir: notes
+        dry_run: false
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -39,12 +38,12 @@ plugin_settings:
 	if cfg.Version != 1 || len(cfg.Targets) != 1 {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
-	if cfg.Plugin != "livesync" {
-		t.Fatalf("unexpected top-level plugin: %q", cfg.Plugin)
-	}
 	target := cfg.Targets[0]
 	if target.Name != "personal" || target.Vault.Path != "/vault/personal" {
 		t.Fatalf("unexpected target: %#v", target)
+	}
+	if target.Plugin != "livesync" {
+		t.Fatalf("unexpected target plugin: %q", target.Plugin)
 	}
 	if target.LiveSync.CouchDB.Password != "secret" || target.LiveSync.CouchDB.BaseDir != "notes" {
 		t.Fatalf("env/default config not decoded: %#v", target.LiveSync.CouchDB)
@@ -54,17 +53,17 @@ plugin_settings:
 func TestLoadRejectsDuplicateTargetsAndUnknownPlugin(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := []byte(`version: 1
-plugin: livesync
-plugin_settings:
-  targets:
-    - name: personal
-      vault: {path: /vault/personal}
-      livesync:
-        couchdb: {url: http://localhost:5984, db: obsidian_personal}
-    - name: personal
-      vault: {path: /vault/personal2}
-      livesync:
-        couchdb: {url: http://localhost:5984, db: obsidian_personal2}
+targets:
+  - name: personal
+    plugin: livesync
+    vault: {path: /vault/personal}
+    livesync:
+      couchdb: {url: http://localhost:5984, db: obsidian_personal}
+  - name: personal
+    plugin: livesync
+    vault: {path: /vault/personal2}
+    livesync:
+      couchdb: {url: http://localhost:5984, db: obsidian_personal2}
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -74,35 +73,48 @@ plugin_settings:
 	}
 }
 
-func TestLoadRejectsPluginInsideTarget(t *testing.T) {
+func TestLoadRejectsTopLevelPlugin(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := []byte(`version: 1
 plugin: livesync
-plugin_settings:
-  targets:
-    - name: personal
-      plugin: git
-      vault: {path: /vault/personal}
-      livesync:
-        couchdb: {url: http://localhost:5984, db: obsidian_personal}
+targets:
+  - name: personal
+    plugin: livesync
+    vault: {path: /vault/personal}
+    livesync:
+      couchdb: {url: http://localhost:5984, db: obsidian_personal}
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected target plugin field to fail")
+		t.Fatal("expected top-level plugin field to fail")
+	}
+}
+
+func TestLoadRejectsMissingTargetPlugin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte(`version: 1
+targets:
+  - name: personal
+    vault: {path: /vault/personal}
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected missing target plugin to fail")
 	}
 }
 
 func TestLoadRejectsLegacyLiveSyncCouchDBTargetKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := []byte(`version: 1
-plugin: livesync
-plugin_settings:
-  targets:
-    - name: personal
-      vault: {path: /vault/personal}
-      livesync_couchdb: {url: http://localhost:5984, db: obsidian_personal}
+targets:
+  - name: personal
+    plugin: livesync
+    vault: {path: /vault/personal}
+    livesync_couchdb: {url: http://localhost:5984, db: obsidian_personal}
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -115,12 +127,11 @@ plugin_settings:
 func TestLoadRejectsGenericDBTargetKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := []byte(`version: 1
-plugin: livesync
-plugin_settings:
-  targets:
-    - name: personal
-      vault: {path: /vault/personal}
-      db: {url: http://localhost:5984, db: obsidian_personal}
+targets:
+  - name: personal
+    plugin: livesync
+    vault: {path: /vault/personal}
+    db: {url: http://localhost:5984, db: obsidian_personal}
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -133,12 +144,11 @@ plugin_settings:
 func TestLoadRejectsDirectCouchDBTargetKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := []byte(`version: 1
-plugin: livesync
-plugin_settings:
-  targets:
-    - name: personal
-      vault: {path: /vault/personal}
-      couchdb: {url: http://localhost:5984, db: obsidian_personal}
+targets:
+  - name: personal
+    plugin: livesync
+    vault: {path: /vault/personal}
+    couchdb: {url: http://localhost:5984, db: obsidian_personal}
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -148,13 +158,31 @@ plugin_settings:
 	}
 }
 
-func TestLoadRejectsLegacyTopLevelCouchDBPlugin(t *testing.T) {
+func TestLoadRejectsLegacyTargetCouchDBPlugin(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	data := []byte(`version: 1
-plugin: livesync-couchdb
+targets:
+  - name: personal
+    plugin: livesync-couchdb
+    vault: {path: /vault/personal}
+    livesync:
+      couchdb: {url: http://localhost:5984, db: obsidian_personal}
+`)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected legacy livesync-couchdb plugin name to fail")
+	}
+}
+
+func TestLoadRejectsLegacyPluginSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	data := []byte(`version: 1
 plugin_settings:
   targets:
     - name: personal
+      plugin: livesync
       vault: {path: /vault/personal}
       livesync:
         couchdb: {url: http://localhost:5984, db: obsidian_personal}
@@ -163,7 +191,7 @@ plugin_settings:
 		t.Fatalf("WriteFile: %v", err)
 	}
 	if _, err := Load(path); err == nil {
-		t.Fatal("expected legacy livesync-couchdb plugin name to fail")
+		t.Fatal("expected legacy plugin_settings to fail")
 	}
 }
 
@@ -202,7 +230,7 @@ func TestResolvePathSearchOrder(t *testing.T) {
 	etcCfg := filepath.Join(etc, "gobsidian", "config.yaml")
 	cwdCfg := filepath.Join(cwd, "config.yaml")
 	for _, path := range []string{homeCfg, etcCfg, cwdCfg} {
-		if err := os.WriteFile(path, []byte("version: 1\nplugin: livesync\nplugin_settings:\n  targets: []\n"), 0o600); err != nil {
+		if err := os.WriteFile(path, []byte("version: 1\ntargets: []\n"), 0o600); err != nil {
 			t.Fatalf("WriteFile: %v", err)
 		}
 	}

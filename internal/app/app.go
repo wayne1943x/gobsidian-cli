@@ -29,15 +29,18 @@ func New(registry *plugin.Registry) *App {
 	return &App{registry: registry}
 }
 
-func (a *App) Sync(ctx context.Context, cfg config.Config) SyncResponse {
+func (a *App) Sync(ctx context.Context, cfg config.Config, opts plugin.SyncOptions) SyncResponse {
 	out := SyncResponse{OK: true, Command: "sync"}
-	driver, err := a.registry.Get(cfg.Plugin)
-	if err != nil {
-		return SyncResponse{OK: false, Command: "sync", Errors: []string{err.Error()}}
-	}
 	for _, target := range cfg.Targets {
-		result, err := driver.Sync(ctx, target)
-		result.Plugin = cfg.Plugin
+		driver, err := a.registry.Get(target.Plugin)
+		if err != nil {
+			out.OK = false
+			out.Errors = append(out.Errors, err.Error())
+			out.Vaults = append(out.Vaults, plugin.SyncResult{Vault: target.Name, Plugin: target.Plugin, Error: err.Error()})
+			continue
+		}
+		result, err := driver.Sync(ctx, target, opts)
+		result.Plugin = target.Plugin
 		if err != nil {
 			out.OK = false
 			result.Error = err.Error()
@@ -50,13 +53,16 @@ func (a *App) Sync(ctx context.Context, cfg config.Config) SyncResponse {
 
 func (a *App) Status(ctx context.Context, cfg config.Config) StatusResponse {
 	out := StatusResponse{OK: true, Command: "status"}
-	driver, err := a.registry.Get(cfg.Plugin)
-	if err != nil {
-		return StatusResponse{OK: false, Command: "status", Errors: []string{err.Error()}}
-	}
 	for _, target := range cfg.Targets {
+		driver, err := a.registry.Get(target.Plugin)
+		if err != nil {
+			out.OK = false
+			out.Errors = append(out.Errors, err.Error())
+			out.Vaults = append(out.Vaults, plugin.StatusResult{Vault: target.Name, Plugin: target.Plugin, Error: err.Error()})
+			continue
+		}
 		result, err := driver.Status(ctx, target)
-		result.Plugin = cfg.Plugin
+		result.Plugin = target.Plugin
 		if err != nil {
 			out.OK = false
 			result.Error = err.Error()

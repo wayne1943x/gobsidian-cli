@@ -18,6 +18,7 @@ import (
 func Run(args []string, stdout, stderr io.Writer, registry *plugin.Registry) error {
 	var configPath string
 	var vaultName string
+	var syncOpts plugin.SyncOptions
 	root := &cobra.Command{
 		Use:           "gobsidian",
 		Short:         "Agent-friendly Obsidian CLI",
@@ -62,11 +63,14 @@ func Run(args []string, stdout, stderr io.Writer, registry *plugin.Registry) err
 		Short: "Synchronize Obsidian vaults once",
 		Args:  cobra.NoArgs,
 		RunE: func(_ *cobra.Command, _ []string) error {
+			if syncOpts.ForceRemote && syncOpts.ForceLocal {
+				return fmt.Errorf("--force-remote and --force-local cannot be used together")
+			}
 			cfg, err := load()
 			if err != nil {
 				return err
 			}
-			resp := runner.Sync(context.Background(), cfg)
+			resp := runner.Sync(context.Background(), cfg, syncOpts)
 			if err := writeJSON(stdout, resp); err != nil {
 				return err
 			}
@@ -77,6 +81,8 @@ func Run(args []string, stdout, stderr io.Writer, registry *plugin.Registry) err
 		},
 	}
 	syncCmd.Flags().StringVarP(&vaultName, "vault", "v", "", "vault name")
+	syncCmd.Flags().BoolVar(&syncOpts.ForceRemote, "force-remote", false, "prefer remote data when resolving sync state")
+	syncCmd.Flags().BoolVar(&syncOpts.ForceLocal, "force-local", false, "prefer local data when resolving sync state")
 	statusCmd := &cobra.Command{
 		Use:   "status",
 		Short: "Print Obsidian vault status",

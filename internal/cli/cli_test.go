@@ -16,13 +16,13 @@ func TestRunSyncOutputsJSONAndFiltersVault(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(`version: 1
-plugin: noop
-plugin_settings:
-  targets:
-    - name: personal
-      vault: {path: /vault/personal}
-    - name: work
-      vault: {path: /vault/work}
+targets:
+  - name: personal
+    plugin: noop
+    vault: {path: /vault/personal}
+  - name: work
+    plugin: noop
+    vault: {path: /vault/work}
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -47,17 +47,37 @@ plugin_settings:
 	}
 }
 
+func TestRunSyncRejectsConflictingForceFlags(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(cfgPath, []byte(`version: 1
+targets:
+  - name: personal
+    plugin: noop
+    vault: {path: /vault/personal}
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	reg := plugin.NewRegistry()
+	_ = reg.Register("noop", noopDriver{})
+	var stdout, stderr bytes.Buffer
+	err := Run([]string{"sync", "--config", cfgPath, "--force-remote", "--force-local"}, &stdout, &stderr, reg)
+	if err == nil {
+		t.Fatalf("expected conflicting force flags to fail, stdout=%s", stdout.String())
+	}
+}
+
 func TestRunReadRequiresVaultWhenMultipleConfigured(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(`version: 1
-plugin: noop
-plugin_settings:
-  targets:
-    - name: first
-      vault: {path: /vault/first}
-    - name: second
-      vault: {path: /vault/second}
+targets:
+  - name: first
+    plugin: noop
+    vault: {path: /vault/first}
+  - name: second
+    plugin: noop
+    vault: {path: /vault/second}
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile config: %v", err)
 	}
@@ -72,11 +92,10 @@ func TestRunStatusReturnsErrorForMissingVault(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
 	if err := os.WriteFile(cfgPath, []byte(`version: 1
-plugin: noop
-plugin_settings:
-  targets:
-    - name: personal
-      vault: {path: /vault/personal}
+targets:
+  - name: personal
+    plugin: noop
+    vault: {path: /vault/personal}
 `), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -91,7 +110,7 @@ plugin_settings:
 
 type noopDriver struct{}
 
-func (noopDriver) Sync(_ context.Context, target config.Target) (plugin.SyncResult, error) {
+func (noopDriver) Sync(_ context.Context, target config.Target, _ plugin.SyncOptions) (plugin.SyncResult, error) {
 	return plugin.SyncResult{Vault: target.Name, FilesWritten: 1}, nil
 }
 
